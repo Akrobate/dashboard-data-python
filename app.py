@@ -2,8 +2,9 @@ import streamlit as st
 import pandas as pd
 import json
 import altair as alt
+import hmac
 
-data_file_path = "../../Bureau/dashboard-data/"
+data_file_path = "./data/dashboard-data/"
 
 consumption_histories_file_path = data_file_path + "consumption_histories_prod.csv"
 organizations_file_path = data_file_path + "organizations_prod.csv"
@@ -15,6 +16,36 @@ company_sectors_file_path = data_file_path + "company_sectors_prod.csv"
 company_sectors_classes_file_path = data_file_path + "company_classes_prod.csv"
 company_workforce_file_path = data_file_path + "workforce_prod.csv"
 company_sales_file_path = data_file_path + "sales_prod.csv"
+
+
+def check_password():
+    """Returns `True` if the user had the correct password."""
+
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if hmac.compare_digest(st.session_state["password"], st.secrets["password"]):
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Don't store the password.
+        else:
+            st.session_state["password_correct"] = False
+
+    # Return True if the password is validated.
+    if st.session_state.get("password_correct", False):
+        return True
+
+    # Show input for password.
+    st.text_input(
+        "Password", type="password", on_change=password_entered, key="password"
+    )
+    if "password_correct" in st.session_state:
+        st.error("😕 Password incorrect")
+    return False
+
+
+if not check_password():
+    st.stop()  # Do not continue if check_password is not True.
+
+
 
 @st.cache_data
 def load_data_consumption():
@@ -195,7 +226,6 @@ aggregation = st.radio("Afficher par :", ["Jour", "Mois"], index=0)
 filtered_df = df[(df["creation_date"] >= pd.Timestamp(start_date)) & (df["creation_date"] <= pd.Timestamp(end_date))]
 
 #filtered_df = filtered_df[filtered_df["type_id"] == selected_type_id]
-
 filtered_df = filtered_df[filtered_df["type_id"].isin(selected_type_id)]
 
 
