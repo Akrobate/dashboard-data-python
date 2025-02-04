@@ -18,7 +18,6 @@ company_sectors_classes_file_path = data_file_path + "company_classes_prod.csv"
 company_workforce_file_path = data_file_path + "workforce_prod.csv"
 company_sales_file_path = data_file_path + "sales_prod.csv"
 
-
 def check_password():
     """Returns `True` if the user had the correct password."""
 
@@ -58,14 +57,23 @@ def check_jwt():
         st.error("Token JWT invalide.")
     return False
 
+no_security = False
+try:
+    no_security = False if st.secrets["no_security"] == 0 else True
+except KeyError:
+    no_security = False
 
-if not check_jwt():
-    if not check_password():
+if not no_security and not check_jwt() and not check_password():
         st.stop()
 
 @st.cache_data
 def load_data_consumption():
-    return pd.read_csv(consumption_histories_file_path, usecols=['id', 'contact_id', 'creation_date', 'organization_id', 'type_id', 'user_id'], parse_dates=["creation_date"])
+    return pd.read_csv(
+        consumption_histories_file_path,
+        usecols=['id', 'contact_id', 'creation_date', 'organization_id', 'type_id', 'user_id'],
+        parse_dates=["creation_date"],
+        #nrows=100000
+    )
 
 @st.cache_data
 def load_data_organization():
@@ -172,10 +180,9 @@ def load_format_main_df():
 
 
 df = load_format_main_df()
+
 org_df = load_data_organization()
 users_df = load_data_users()
-#contacts_df = load_data_contact()
-#companies_df = load_data_companies()
 job_types_df = load_data_job_types()
 
 companies_sector_df = load_data_company_sectors()
@@ -196,7 +203,6 @@ type_ids_dict = {
     "mobiles": 9,
 }
 
-
 # Définir la période par défaut (les 31 derniers jours)
 default_end_date = df["creation_date"].max()
 default_start_date = default_end_date - pd.Timedelta(days=31)
@@ -204,6 +210,7 @@ default_start_date = default_end_date - pd.Timedelta(days=31)
 
 # Interface Streamlit
 st.title("Consommation de Données")
+
 
 st.sidebar.header("Filtres")
 
@@ -232,10 +239,14 @@ selected_users_names = st.sidebar.multiselect("Sélectionner un ou plusieurs uti
 selected_users_ids = [users_dict[name] for name in selected_users_names]
 
 
-
-
 # Affichage par jour ou par mois
-aggregation = st.radio("Afficher par :", ["Jour", "Mois"], index=0)
+#aggregation = st.radio("Afficher par :", ["Jour", "Mois"], index=0)
+aggregation = st.selectbox(
+    "",
+    ("Jour", "Mois"),
+    index=0,
+)
+
 
 # Filtrage des données
 filtered_df = df[(df["creation_date"] >= pd.Timestamp(start_date)) & (df["creation_date"] <= pd.Timestamp(end_date))]
@@ -253,6 +264,9 @@ if selected_users_ids:
     filtered_df = filtered_df[filtered_df["user_id"].isin(selected_users_ids)]
 
 
+##############################################################
+#  CONSOMMATIONS PERIODE GRAPHIQUE HORIZONTAL
+##############################################################
 
 # Agrégation des données
 if aggregation == "Jour":
@@ -266,6 +280,11 @@ else:
     grouped_df = pd.DataFrame({"creation_date": all_dates}).merge(grouped_df, on="creation_date", how="left").fillna(0)
     grouped_df["creation_date"] = grouped_df["creation_date"].astype(str)  # Pour affichage correct
 
+primary_color = st.get_option("theme.primaryColor")
+background_color = st.get_option("theme.backgroundColor")
+text_color = st.get_option("theme.textColor")
+secondary_background_color = st.get_option("theme.secondaryBackgroundColor")
+
 # Graphique avec Altair
 chart = alt.Chart(grouped_df).mark_bar().encode(
     x=alt.X("creation_date:N", title="Date", sort=None),
@@ -274,25 +293,41 @@ chart = alt.Chart(grouped_df).mark_bar().encode(
 ).properties(
     width=800,
     # height=400,
-    title=f"Consommation par {aggregation.lower()}"
-).configure_axis(
+    # title=f"Consommation par {aggregation.lower()}"
+)
+
+# Graphique pour les labels
+text_labels = alt.Chart(grouped_df).mark_text(
+    align="center",
+    baseline="bottom",
+    dy=-5,  # Décalage vertical pour placer les labels au-dessus des barres
+    color=text_color,
+    #angle=45
+).encode(
+    x=alt.X("creation_date:N", sort=None),
+    y="count:Q",
+    text=alt.Text("count:Q", format=",") 
+)
+
+final_chart = (chart + text_labels).configure_axis(
     labelAngle=-45
 )
 
-st.altair_chart(chart, use_container_width=True)
+st.altair_chart(final_chart, use_container_width=True)
 
 
 if selected_org_ids and not selected_users_ids:
 
+    ##############################################################
+    #  CHAMPIONS USERS
+    ##############################################################
+    st.subheader("🥇 Champions de l'organization")
     user_champtions_counts = filtered_df["user_id"].value_counts().reset_index()
     user_champtions_counts.columns = ["user_id", "count"]
     user_champtions_counts = user_champtions_counts.merge(users_df, left_on="user_id", right_on="id", how="left")
     user_champtions_counts["name"] = user_champtions_counts["first_name"] + " " + user_champtions_counts["last_name"] + " (" + user_champtions_counts["id"].astype(str) + ")"
-
-
     user_champtions_counts["name"].fillna("Inconnu", inplace=True)
 
-    st.subheader("Champions de l'organization")
     chart = alt.Chart(user_champtions_counts).mark_bar().encode(
         x=alt.X("count:Q", title="Nombre d'occurrences"),
         y=alt.Y("name:N", title="", sort="-x"),
@@ -307,129 +342,303 @@ if selected_org_ids and not selected_users_ids:
     st.altair_chart(chart, use_container_width=True)
 
 
+if not selected_org_ids and not selected_users_ids:
 
-# Job types (Familles de fonctions)
-# Calcul des occurrences des job_type_id
+    ##############################################################
+    #  CHAMPIONS ORGANIZATIONS
+    ##############################################################
+    st.subheader("🥇 Top 10 des organizations")
+
+    organizations_champtions_counts = filtered_df["organization_id"].value_counts().reset_index()
+    organizations_champtions_counts.columns = ["organization_id", "count"]
+    organizations_champtions_counts = organizations_champtions_counts.merge(org_df, left_on="organization_id", right_on="id", how="left")
+    organizations_champtions_counts["name"] = organizations_champtions_counts["name"] + " (" + organizations_champtions_counts["id"].astype(str) + ")"
+    organizations_champtions_counts["name"].fillna("Inconnu", inplace=True)
+
+    organizations_champtions_counts = organizations_champtions_counts.head(10)
+
+    chart = alt.Chart(organizations_champtions_counts).mark_bar().encode(
+        x=alt.X("count:Q", title="Nombre d'occurrences"),
+        y=alt.Y("name:N", title="", sort="-x"),
+        tooltip=["name", "count"]
+    ).properties(
+        #title="Nombre d'occurrences par Tranche d'effectif"
+    ).configure_axis(
+        labelFontSize=12,
+        titleFontSize=14,
+        labelLimit=300  # Augmente l'espace pour les labels
+    )
+    st.altair_chart(chart, use_container_width=True)
+
+
+st.dataframe(df.head(1000))
+
+
+##############################################################
+#  FAMILLE DE FONCTIONS
+##############################################################
+
+st.subheader("👔 Répartition par famille de fonction")
 job_counts = filtered_df["job_type_id"].value_counts().reset_index()
 job_counts.columns = ["job_type_id", "count"]
 job_counts = job_counts.merge(job_types_df, left_on="job_type_id", right_on="id", how="left")
 job_counts["name"].fillna("Inconnu", inplace=True)
 
-st.subheader("Répartition par famille de fonction")
 chart = alt.Chart(job_counts).mark_bar().encode(
     x=alt.X("count:Q", title="Nombre d'occurrences"),
     y=alt.Y("name:N", title="", sort="-x"),
-    tooltip=["name", "count"]
+    tooltip=["name", "count"],
 ).properties(
     width=700,
-    # height=500,
-    #title="Nombre d'occurrences par famille de fonctions"
-).configure_axis(
-    labelFontSize=12,
-    titleFontSize=14,
-    labelLimit=300  # Augmente l'espace pour les labels
+    color="#ff0000"
 )
 
-st.altair_chart(chart, use_container_width=True)
+text_labels = alt.Chart(job_counts).mark_text(
+    align="left",
+    baseline="middle",
+    dx=5,
+    color=text_color
+).encode(
+    x=alt.X("count:Q", title="Nombre d'occurrences"),
+    y=alt.Y("name:N", title="", sort="-x"),
+    text=alt.Text("count:Q", format=",") 
+)
+
+final_chart = (chart + text_labels).configure_axis(
+    labelFontSize=12,
+    titleFontSize=14,
+    labelLimit=300
+)
+
+st.altair_chart(final_chart, use_container_width=True)
 
 
+
+
+
+
+##############################################################
+#  Hierarchical name
+##############################################################
+st.subheader("🔝 Niveau hierarchique")
+
+hierarchical_counts = filtered_df["hierarchical_name"].value_counts().reset_index()
+hierarchical_counts.columns = ["hierarchical_name", "count"]
+
+total_count = hierarchical_counts["count"].sum()
+hierarchical_counts["rate"] = (hierarchical_counts["count"] / total_count) * 100
+hierarchical_counts["rate"] = hierarchical_counts["rate"].round(2)
+hierarchical_counts['rate_with_units'] = hierarchical_counts['rate'].apply(lambda x: f"{x:,.0f} %")
+chart = alt.Chart(hierarchical_counts).mark_bar().encode(
+    x=alt.X("count:Q", title="Nombre d'occurrences"),
+    y=alt.Y("hierarchical_name:N", title="", sort="-x"),
+    tooltip=["hierarchical_name", "count"]
+)
+
+text_labels = alt.Chart(hierarchical_counts).mark_text(
+    align="left",
+    baseline="middle",
+    dx=5,
+    color=text_color
+).encode(
+    x=alt.X("count:Q", title="Nombre d'occurrences"),
+    y=alt.Y("hierarchical_name:N", title="", sort="-x"),
+    text=alt.Text("count:Q", format=",") 
+)
+final_chart = (chart + text_labels).configure_axis(
+    labelFontSize=12,
+    titleFontSize=14,
+    labelLimit=300
+)
+st.altair_chart(final_chart, use_container_width=True)
+
+######
+chart = alt.Chart(hierarchical_counts).mark_bar().encode(
+    x=alt.X("rate:Q", title="Nombre d'occurrences"),
+    y=alt.Y("hierarchical_name:N", title="", sort="-x"),
+    tooltip=["hierarchical_name", "rate"]
+)
+
+text_labels = alt.Chart(hierarchical_counts).mark_text(
+    align="left",
+    baseline="middle",
+    dx=5,
+    color=text_color
+).encode(
+    x=alt.X("rate:Q", title="Nombre d'occurrences"),
+    y=alt.Y("hierarchical_name:N", title="", sort="-x"),
+    text="rate_with_units"
+)
+
+final_chart = (chart + text_labels).configure_axis(
+    labelFontSize=12,
+    titleFontSize=14,
+    labelLimit=300
+)
+st.altair_chart(final_chart, use_container_width=True)
+
+
+
+
+
+# Créer un pie chart avec Altair
+pie_chart = alt.Chart(hierarchical_counts).mark_arc().encode(
+    theta=alt.Theta(field="count", type="quantitative"),
+    color=alt.Color(field="hierarchical_name", type="nominal"),
+    tooltip=["hierarchical_name", "count"]
+).properties(
+    width=400,
+    height=400,
+    title="Répartition des catégories"
+)
+st.altair_chart(pie_chart, use_container_width=True)
+
+
+
+##############################################################
+#  Workforce
+##############################################################
 
 # Workforce
-# Calcul des occurrences des job_type_id
+st.subheader("👷 Répartition par Tranche d'effectif")
+
 workforce_counts = filtered_df["Tranche d'effectif"].value_counts().reset_index()
 workforce_counts.columns = ["Tranche d'effectif", "count"]
 workforce_counts = workforce_counts.merge(companies_workforce_df, left_on="Tranche d'effectif", right_on="id", how="left")
 workforce_counts["name"].fillna("Inconnu", inplace=True)
 
-st.subheader("Répartition par Tranche d'effectif")
 chart = alt.Chart(workforce_counts).mark_bar().encode(
     x=alt.X("count:Q", title="Nombre d'occurrences"),
     y=alt.Y("name:N", title="", sort="-x"),
     tooltip=["name", "count"]
-).properties(
-    #title="Nombre d'occurrences par Tranche d'effectif"
-).configure_axis(
-    labelFontSize=12,
-    titleFontSize=14,
-    labelLimit=300  # Augmente l'espace pour les labels
 )
 
-st.altair_chart(chart, use_container_width=True)
+text_labels = alt.Chart(workforce_counts).mark_text(
+    align="left",
+    baseline="middle",
+    dx=5,
+    color=text_color
+).encode(
+    x=alt.X("count:Q", title="Nombre d'occurrences"),
+    y=alt.Y("name:N", title="", sort="-x"),
+    text=alt.Text("count:Q", format=",") 
+)
+
+final_chart = (chart + text_labels).configure_axis(
+    labelFontSize=12,
+    titleFontSize=14,
+    labelLimit=300
+)
+
+st.altair_chart(final_chart, use_container_width=True)
 
 
+##############################################################
+#  Tranches CA
+##############################################################
 
-
-
-
-# Tranches CA
-# Calcul des occurrences des job_type_id
+st.subheader("💵 Répartition par Tranche de CA")
 company_sales_counts = filtered_df["Tranche de CA"].value_counts().reset_index()
 company_sales_counts.columns = ["Tranche de CA", "count"]
 company_sales_counts = company_sales_counts.merge(companies_sales_df, left_on="Tranche de CA", right_on="id", how="left")
 company_sales_counts["name"].fillna("Inconnu", inplace=True)
 
-st.subheader("Répartition par Tranche de CA")
 chart = alt.Chart(company_sales_counts).mark_bar().encode(
     x=alt.X("count:Q", title="Nombre d'occurrences"),
     y=alt.Y("name:N", title="", sort="-x"),
     tooltip=["name", "count"]
-).properties(
-    #title="Nombre d'occurrences par Tranche de CA"
-).configure_axis(
-    labelFontSize=12,
-    titleFontSize=14,
-    labelLimit=300  # Augmente l'espace pour les labels
 )
 
-st.altair_chart(chart, use_container_width=True)
+text_labels = alt.Chart(company_sales_counts).mark_text(
+    align="left",
+    baseline="middle",
+    dx=5,
+    color=text_color
+).encode(
+    x=alt.X("count:Q", title="Nombre d'occurrences"),
+    y=alt.Y("name:N", title="", sort="-x"),
+    text=alt.Text("count:Q", format=",") 
+)
+
+final_chart = (chart + text_labels).configure_axis(
+    labelFontSize=12,
+    titleFontSize=14,
+    labelLimit=300
+)
+
+st.altair_chart(final_chart, use_container_width=True)
 
 
 
-# Secteurs (Secteurs types)
-# Calcul des occurrences des job_type_id
+##############################################################
+#  Secteurs (Secteurs types)
+##############################################################
+
+st.subheader("💼 Répartition par méta secteur")
 meta_sector_counts = filtered_df["class"].value_counts().reset_index()
 meta_sector_counts.columns = ["class", "count"]
 meta_sector_counts = meta_sector_counts.merge(companies_sector_class_df, left_on="class", right_on="id", how="left")
 meta_sector_counts["name"].fillna("Inconnu", inplace=True)
 
-st.subheader("Répartition par méta secteur")
 chart = alt.Chart(meta_sector_counts).mark_bar().encode(
     x=alt.X("count:Q", title="Nombre d'occurrences"),
     y=alt.Y("name:N", title="", sort="-x"),
     tooltip=["name", "count"]
-).properties(
-    #title="Nombre d'occurrences par méta Secteur"
-).configure_axis(
-    labelFontSize=12,
-    titleFontSize=14,
-    labelLimit=300  # Augmente l'espace pour les labels
 )
 
-st.altair_chart(chart, use_container_width=True)
+text_labels = alt.Chart(meta_sector_counts).mark_text(
+    align="left",
+    baseline="middle",
+    dx=5,
+    color=text_color
+).encode(
+    x=alt.X("count:Q", title="Nombre d'occurrences"),
+    y=alt.Y("name:N", title="", sort="-x"),
+    text=alt.Text("count:Q", format=",") 
+)
+
+final_chart = (chart + text_labels).configure_axis(
+    labelFontSize=12,
+    titleFontSize=14,
+    labelLimit=300
+)
+
+st.altair_chart(final_chart, use_container_width=True)
 
 
 
-# Secteurs (Secteurs)
-# Calcul des occurrences des job_type_id
+##############################################################
+#  Secteurs (Secteurs types)
+##############################################################
+st.subheader("🏭 Répartition par secteur")
 sector_counts = filtered_df["Secteur"].value_counts().reset_index()
 sector_counts.columns = ["Secteur", "count"]
 sector_counts = sector_counts.merge(companies_sector_df, left_on="Secteur", right_on="id", how="left")
 sector_counts["name"].fillna("Inconnu", inplace=True)
 
-st.subheader("Répartition par secteur")
 chart = alt.Chart(sector_counts).mark_bar().encode(
     x=alt.X("count:Q", title="Nombre d'occurrences"),
     y=alt.Y("name:N", title="", sort="-x"),
     tooltip=["name", "count"]
-).properties(
-    title="Nombre d'occurrences par Secteur"
-).configure_axis(
-    labelFontSize=12,
-    titleFontSize=14,
-    labelLimit=300  # Augmente l'espace pour les labels
 )
 
-st.altair_chart(chart, use_container_width=True)
+text_labels = alt.Chart(sector_counts).mark_text(
+    align="left",
+    baseline="middle",
+    dx=5,
+    color=text_color
+).encode(
+    x=alt.X("count:Q", title="Nombre d'occurrences"),
+    y=alt.Y("name:N", title="", sort="-x"),
+    text=alt.Text("count:Q", format=",") 
+)
+
+final_chart = (chart + text_labels).configure_axis(
+    labelFontSize=12,
+    titleFontSize=14,
+    labelLimit=300
+)
+st.altair_chart(final_chart, use_container_width=True)
 
 
 

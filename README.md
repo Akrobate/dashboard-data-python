@@ -7,7 +7,7 @@ in root of the app create `.strealit/secrets.toml`
 ```
 password = "mypassword"
 jwt_public_key = ""
-jwt_algorithms = ""
+jwt_algorithm = ""
 ```
 
 
