@@ -3,6 +3,7 @@ import pandas as pd
 import json
 import altair as alt
 import hmac
+import jwt
 
 data_file_path = "./data/dashboard-data/"
 
@@ -42,10 +43,25 @@ def check_password():
     return False
 
 
-if not check_password():
-    st.stop()  # Do not continue if check_password is not True.
+def check_jwt():
+    query_params = st.query_params
+    jwt_token = query_params.get("jwt_token", None)
+    if jwt_token is None:
+        return False
+    try:
+        decoded = jwt.decode(jwt_token, st.secrets["jwt_public_key"], algorithms=[st.secrets["jwt_algorithm"]])
+        # should test here admin_level_id
+        return True
+    except jwt.ExpiredSignatureError:
+        st.error("Le token JWT a expiré.")
+    except jwt.InvalidTokenError:
+        st.error("Token JWT invalide.")
+    return False
 
 
+if not check_jwt():
+    if not check_password():
+        st.stop()
 
 @st.cache_data
 def load_data_consumption():
@@ -153,7 +169,6 @@ def load_format_main_df():
     df = df.drop(columns=['id_y']).rename(columns={'id_x': 'id'})
 
     return df
-
 
 
 df = load_format_main_df()

@@ -15,6 +15,7 @@ COPY requirements.txt .
 
 #RUN pip3 install -r requirements.txt
 RUN pip install streamlit
+RUN pip install pyjwt
 
 EXPOSE 8501
 

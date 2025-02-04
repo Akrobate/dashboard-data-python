@@ -6,6 +6,8 @@ in root of the app create `.strealit/secrets.toml`
 
 ```
 password = "mypassword"
+jwt_public_key = ""
+jwt_algorithms = ""
 ```
 
 
@@ -15,7 +17,7 @@ python3 -m virtualenv venv
 
 source venv/bin/activate
 
-pip install streamlit
+pip install streamlit pyjwt
 
 streamlit hello
 
