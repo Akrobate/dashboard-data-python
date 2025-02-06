@@ -1,3 +1,4 @@
 data/
 .streamlit
+draft.py
 __pycache__/

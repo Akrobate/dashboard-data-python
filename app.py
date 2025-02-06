@@ -390,7 +390,6 @@ chart = alt.Chart(job_counts).mark_bar().encode(
     tooltip=["name", "count"],
 ).properties(
     width=700,
-    color="#ff0000"
 )
 
 text_labels = alt.Chart(job_counts).mark_text(
