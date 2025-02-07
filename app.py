@@ -66,14 +66,29 @@ except KeyError:
 if not no_security and not check_jwt() and not check_password():
         st.stop()
 
+
 @st.cache_data
 def load_data_consumption():
+    debug = False
+    try:
+        debug = False if st.secrets["debug"] == 0 else True
+    except KeyError:
+        debug = False
+
+    if debug:
+        return pd.read_csv(
+            consumption_histories_file_path,
+            usecols=['id', 'contact_id', 'creation_date', 'organization_id', 'type_id', 'user_id'],
+            parse_dates=["creation_date"],
+            nrows=100000
+        )
+
     return pd.read_csv(
         consumption_histories_file_path,
         usecols=['id', 'contact_id', 'creation_date', 'organization_id', 'type_id', 'user_id'],
         parse_dates=["creation_date"],
-        #nrows=100000
     )
+
 
 @st.cache_data
 def load_data_organization():
